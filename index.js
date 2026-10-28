@@ -26,7 +26,7 @@ fastify.get('/', async (request, reply) => {
 });
 
 // ----------------------------------------------------------------------
-// 100% Free Ultra-Fast AI Endpoint (Groq Llama 3)
+// 100% Free AI Endpoint with Automatic Model Fallback
 // ----------------------------------------------------------------------
 fastify.post('/chat', async (request, reply) => {
     try {
@@ -36,32 +36,50 @@ fastify.post('/chat', async (request, reply) => {
             return reply.status(500).send({ error: 'Missing GROQ_API_KEY on Render Environment.' });
         }
 
-        // Groq API endpoint (100% free, ultra-fast)
-        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${API_KEY}`,
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                model: 'llama-3.1-8b-instant',
-                messages: [
-                    { role: 'system', content: SYSTEM_MESSAGE },
-                    ...(messages || [])
-                ],
-                max_tokens: 150,
-                temperature: 0.7,
-            }),
-        });
+        // List of models to try in order of speed
+        const candidateModels = [
+            'llama-3.1-8b-instant',
+            'gemma2-9b-it',
+            'mixtral-8x7b-32768',
+            'llama3-8b-8192'
+        ];
 
-        const data = await response.json();
+        let lastError = null;
 
-        if (data.error) {
-            return reply.status(400).send({ error: data.error.message });
+        for (const model of candidateModels) {
+            try {
+                const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${API_KEY}`,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        model: model,
+                        messages: [
+                            { role: 'system', content: SYSTEM_MESSAGE },
+                            ...(messages || [])
+                        ],
+                        max_tokens: 150,
+                        temperature: 0.7,
+                    }),
+                });
+
+                const data = await response.json();
+
+                if (data.choices?.[0]?.message?.content) {
+                    return reply.send({ reply: data.choices[0].message.content });
+                }
+
+                if (data.error) {
+                    lastError = data.error.message;
+                }
+            } catch (err) {
+                lastError = err.message;
+            }
         }
 
-        const replyText = data.choices?.[0]?.message?.content || 'I could not hear you clearly. Could you repeat that?';
-        reply.send({ reply: replyText });
+        return reply.status(400).send({ error: lastError || 'Failed to connect to AI' });
 
     } catch (err) {
         console.error('Chat error:', err);
