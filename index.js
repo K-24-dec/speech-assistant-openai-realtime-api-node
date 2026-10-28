@@ -35,7 +35,7 @@ fastify.get('/', async (request, reply) => {
     reply.send({ message: 'Twilio Media Stream Server is running!' });
 });
 
-// Endpoint to generate an ephemeral session token with full error logging
+// Endpoint to generate an ephemeral session token with the required OpenAI-Beta header
 fastify.get('/session', async (request, reply) => {
     try {
         const response = await fetch('https://api.openai.com/v1/realtime/sessions', {
@@ -43,6 +43,7 @@ fastify.get('/session', async (request, reply) => {
             headers: {
                 'Authorization': `Bearer ${OPENAI_API_KEY}`,
                 'Content-Type': 'application/json',
+                'OpenAI-Beta': 'realtime=v1',
             },
             body: JSON.stringify({
                 model: 'gpt-4o-realtime-preview-2024-12-17',
@@ -60,7 +61,7 @@ fastify.get('/session', async (request, reply) => {
     }
 });
 
-// Browser Call Screen with Detailed Error Reporting
+// Browser Call Screen
 fastify.get('/call', async (request, reply) => {
     const html = `<!DOCTYPE html>
 <html lang="en">
@@ -121,7 +122,7 @@ fastify.get('/call', async (request, reply) => {
             document.getElementById('hangupBtn').style.display = 'flex';
 
             try {
-                // 1. Get session token
+                // 1. Get session token with beta header
                 const tokenResponse = await fetch('/session');
                 const sessionData = await tokenResponse.json();
 
@@ -142,13 +143,13 @@ fastify.get('/call', async (request, reply) => {
                 try {
                     localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 } catch (micErr) {
-                    showError('Microphone Blocked: Please tap the lock icon in your browser URL bar and allow microphone permission.');
+                    showError('Microphone Blocked: Please allow microphone access in your browser settings.');
                     return;
                 }
 
-                statusEl.innerText = 'Negotiating audio stream...';
+                statusEl.innerText = 'Connecting call audio...';
 
-                // 3. WebRTC Setup
+                // 3. WebRTC setup with OpenAI
                 pc = new RTCPeerConnection();
 
                 const audioEl = document.createElement('audio');
@@ -168,7 +169,8 @@ fastify.get('/call', async (request, reply) => {
                     method: 'POST',
                     headers: {
                         'Authorization': 'Bearer ' + EPHEMERAL_KEY,
-                        'Content-Type': 'application/sdp'
+                        'Content-Type': 'application/sdp',
+                        'OpenAI-Beta': 'realtime=v1'
                     },
                     body: offer.sdp
                 });
