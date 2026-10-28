@@ -22,11 +22,24 @@ Rules:
 const PORT = process.env.PORT || 5050;
 
 fastify.get('/', async (request, reply) => {
-    reply.send({ message: 'Free AI English Tutor Server is running with Groq!' });
+    reply.send({ message: 'Free AI English Tutor Server is running with Groq Auto-Detect!' });
+});
+
+// View all active Groq models on your account
+fastify.get('/models', async (request, reply) => {
+    try {
+        const res = await fetch('https://api.groq.com/openai/v1/models', {
+            headers: { 'Authorization': `Bearer ${API_KEY}` }
+        });
+        const data = await res.json();
+        reply.send(data);
+    } catch (e) {
+        reply.status(500).send({ error: e.message });
+    }
 });
 
 // ----------------------------------------------------------------------
-// 100% Free AI Endpoint with Automatic Model Fallback
+// Dynamic AI Endpoint (Auto-detects active Groq models)
 // ----------------------------------------------------------------------
 fastify.post('/chat', async (request, reply) => {
     try {
@@ -36,17 +49,27 @@ fastify.post('/chat', async (request, reply) => {
             return reply.status(500).send({ error: 'Missing GROQ_API_KEY on Render Environment.' });
         }
 
-        // List of models to try in order of speed
-        const candidateModels = [
-            'llama-3.1-8b-instant',
-            'gemma2-9b-it',
-            'mixtral-8x7b-32768',
-            'llama3-8b-8192'
-        ];
+        // 1. Ask Groq for all active models
+        const modelsRes = await fetch('https://api.groq.com/openai/v1/models', {
+            headers: { 'Authorization': `Bearer ${API_KEY}` }
+        });
+        const modelsData = await modelsRes.json();
+        
+        let availableModels = [];
+        if (modelsData.data && Array.isArray(modelsData.data)) {
+            availableModels = modelsData.data
+                .map(m => m.id)
+                .filter(id => !id.includes('whisper') && !id.includes('guard'));
+        }
+
+        if (availableModels.length === 0) {
+            availableModels = ['llama-3.3-70b-versatile', 'llama-3.2-3b-preview', 'llama-3.2-1b-preview'];
+        }
 
         let lastError = null;
 
-        for (const model of candidateModels) {
+        // 2. Try the first working active model
+        for (const model of availableModels) {
             try {
                 const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
                     method: 'POST',
@@ -68,7 +91,7 @@ fastify.post('/chat', async (request, reply) => {
                 const data = await response.json();
 
                 if (data.choices?.[0]?.message?.content) {
-                    return reply.send({ reply: data.choices[0].message.content });
+                    return reply.send({ reply: data.choices[0].message.content, modelUsed: model });
                 }
 
                 if (data.error) {
@@ -79,7 +102,7 @@ fastify.post('/chat', async (request, reply) => {
             }
         }
 
-        return reply.status(400).send({ error: lastError || 'Failed to connect to AI' });
+        return reply.status(400).send({ error: lastError || 'No active model available' });
 
     } catch (err) {
         console.error('Chat error:', err);
