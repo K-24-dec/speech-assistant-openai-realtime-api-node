@@ -4,7 +4,8 @@ import fastifyFormBody from '@fastify/formbody';
 
 dotenv.config();
 
-const { OPENAI_API_KEY } = process.env;
+const { GROQ_API_KEY, OPENAI_API_KEY } = process.env;
+const API_KEY = GROQ_API_KEY || OPENAI_API_KEY;
 
 const fastify = Fastify();
 fastify.register(fastifyFormBody);
@@ -13,36 +14,37 @@ const SYSTEM_MESSAGE = `You are a friendly, patient, professional English-speaki
 Your goal is to help me become confident and fluent in spoken English through a natural phone call conversation.
 
 Rules:
-- Keep your answers short (1 to 3 sentences maximum) so the conversation feels fast and like a real phone call.
+- Keep your answers short (1 to 2 sentences) so the conversation feels fast and like a real phone call.
 - Always ask one simple question at the end to keep me talking.
-- If I make a grammatical error, gently show the correct way, then continue the conversation.
+- If I make a grammar or vocabulary mistake, briefly show the natural way to say it, then continue.
 - Speak in clear, warm, conversational American English.`;
 
 const PORT = process.env.PORT || 5050;
 
 fastify.get('/', async (request, reply) => {
-    reply.send({ message: 'Free AI English Tutor Server is running!' });
+    reply.send({ message: 'Free AI English Tutor Server is running with Groq!' });
 });
 
 // ----------------------------------------------------------------------
-// Fast, Low-Cost / Free Chat Endpoint (gpt-4o-mini)
+// 100% Free Ultra-Fast AI Endpoint (Groq Llama 3)
 // ----------------------------------------------------------------------
 fastify.post('/chat', async (request, reply) => {
     try {
         const { messages } = request.body || {};
 
-        if (!OPENAI_API_KEY) {
-            return reply.status(500).send({ error: 'Missing OPENAI_API_KEY on Render environment.' });
+        if (!API_KEY) {
+            return reply.status(500).send({ error: 'Missing GROQ_API_KEY on Render Environment.' });
         }
 
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        // Groq API endpoint (100% free, ultra-fast)
+        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
             method: 'POST',
             headers: {
-                'Authorization': `Bearer ${OPENAI_API_KEY}`,
+                'Authorization': `Bearer ${API_KEY}`,
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-                model: 'gpt-4o-mini',
+                model: 'llama-3.3-70b-versatile',
                 messages: [
                     { role: 'system', content: SYSTEM_MESSAGE },
                     ...(messages || [])
@@ -119,12 +121,11 @@ fastify.get('/call', async (request, reply) => {
         const statusEl = document.getElementById('status');
         const speechBox = document.getElementById('speechBox');
 
-        // Check Speech Recognition support
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
         function startCall() {
             if (!SpeechRecognition) {
-                alert('Your browser does not support voice recognition. Please open this page in Google Chrome or Safari.');
+                alert('Please open this page in Google Chrome or Safari on your phone.');
                 return;
             }
 
@@ -134,7 +135,6 @@ fastify.get('/call', async (request, reply) => {
             document.getElementById('timer').style.display = 'block';
             startTimer();
 
-            // Setup speech recognition
             recognition = new SpeechRecognition();
             recognition.lang = 'en-US';
             recognition.interimResults = false;
@@ -155,7 +155,6 @@ fastify.get('/call', async (request, reply) => {
                 statusEl.innerText = 'Tutor is thinking... 💭';
                 statusEl.style.color = '#94a3b8';
 
-                // Send to backend
                 conversationHistory.push({ role: 'user', content: userText });
                 
                 try {
@@ -189,11 +188,7 @@ fastify.get('/call', async (request, reply) => {
                 }
             };
 
-            recognition.onend = () => {
-                // Wait for speech synthesis or restart
-            };
-
-            // Start by having the tutor greet first!
+            // Greeting from tutor
             const greeting = "Hello! I am your English coach. How was your day today?";
             conversationHistory.push({ role: 'assistant', content: greeting });
             speakReply(greeting);
@@ -210,7 +205,6 @@ fastify.get('/call', async (request, reply) => {
             utterance.lang = 'en-US';
             utterance.rate = 0.95;
 
-            // Pick a good English voice
             const voices = window.speechSynthesis.getVoices();
             const englishVoice = voices.find(v => v.lang.startsWith('en') && (v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Natural')));
             if (englishVoice) utterance.voice = englishVoice;
