@@ -17,38 +17,25 @@ const fastify = Fastify();
 fastify.register(fastifyFormBody);
 fastify.register(fastifyWs);
 
-// ----------------------------------------------------------------------
-// English Tutor System Instruction
-// ----------------------------------------------------------------------
-const SYSTEM_MESSAGE = `You are my friendly, patient, professional English-speaking coach. Speak naturally in clear, simple American English. Use a warm, calm, gentleman-like voice with a relatively low pitch when supported by the selected voice.
+const SYSTEM_MESSAGE = `You are my friendly, patient, professional English-speaking coach. Speak naturally in clear, simple American English. Use a warm, calm, gentleman-like voice.
 
-Your main goal is to help me become confident and fluent in spoken English. Speak at a moderate pace, avoid unnecessarily complicated vocabulary, and give me enough time to respond.
+Your main goal is to help me become confident and fluent in spoken English. Speak at a moderate pace, avoid complicated vocabulary, and give me time to respond.
 
-Treat mistakes as a normal part of learning. Never embarrass me, criticize me harshly, or interrupt unnecessarily. Encourage me to speak rather than giving long lectures.
-
-Structure each 15-minute session as follows:
-- Minutes 0-2 (Warm-up): Greet me warmly. Ask how my day went. Ask one simple question to get me talking.
-- Minutes 2-5 (Everyday Conversation): Choose a topic like college, hobbies, technology, career, travel, or startups. Ask follow-up questions.
-- Minutes 5-9 (Focused Practice): Practice pronunciation, grammar correction, vocabulary, or explaining technical concepts.
-- Minutes 9-12 (Role-Play): Simulate real-world situations like job interviews, meetings, or project presentations.
-- Minutes 12-14 (Feedback): Give no more than 3 gentle, specific corrections (what I said vs a more natural version).
-- Minutes 14-15 (Recap & Goodbye): Mention new words learned and end politely.
-
-Conversation rules:
-- Speak one question at a time.
-- Let me do most of the talking.
-- If I struggle, provide a short example and encourage me.`;
+Structure each 15-minute session:
+- Minutes 0-2: Warm-up & friendly greeting.
+- Minutes 2-5: Everyday conversational topic.
+- Minutes 5-9: Speaking practice and pronunciation.
+- Minutes 9-12: Real-world role play.
+- Minutes 12-14: Up to 3 helpful corrections.
+- Minutes 14-15: Recap and goodbye.`;
 
 const PORT = process.env.PORT || 5050;
 
-// Root Route
 fastify.get('/', async (request, reply) => {
     reply.send({ message: 'Twilio Media Stream Server is running!' });
 });
 
-// ----------------------------------------------------------------------
-// Endpoint to generate an ephemeral OpenAI Realtime session token
-// ----------------------------------------------------------------------
+// Endpoint to generate an ephemeral session token with full error logging
 fastify.get('/session', async (request, reply) => {
     try {
         const response = await fetch('https://api.openai.com/v1/realtime/sessions', {
@@ -61,8 +48,7 @@ fastify.get('/session', async (request, reply) => {
                 model: 'gpt-4o-realtime-preview-2024-12-17',
                 voice: 'alloy',
                 instructions: SYSTEM_MESSAGE,
-                turn_detection: { type: 'server_vad' },
-                input_audio_transcription: { model: 'whisper-1' }
+                turn_detection: { type: 'server_vad' }
             }),
         });
 
@@ -70,13 +56,11 @@ fastify.get('/session', async (request, reply) => {
         reply.send(data);
     } catch (err) {
         console.error('Error creating OpenAI session:', err);
-        reply.status(500).send({ error: 'Failed to create realtime session' });
+        reply.status(500).send({ error: { message: err.message } });
     }
 });
 
-// ----------------------------------------------------------------------
-// Mobile-Optimized Browser Voice Call Screen
-// ----------------------------------------------------------------------
+// Browser Call Screen with Detailed Error Reporting
 fastify.get('/call', async (request, reply) => {
     const html = `<!DOCTYPE html>
 <html lang="en">
@@ -87,10 +71,11 @@ fastify.get('/call', async (request, reply) => {
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
         body { background: #0f172a; color: white; display: flex; flex-direction: column; align-items: center; justify-content: space-between; height: 100vh; padding: 40px 20px; }
-        .caller-info { text-align: center; margin-top: 40px; }
+        .caller-info { text-align: center; margin-top: 40px; max-width: 90%; }
         .avatar { width: 110px; height: 110px; border-radius: 50%; background: #334155; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 48px; box-shadow: 0 0 25px rgba(56, 189, 248, 0.3); }
         .caller-name { font-size: 26px; font-weight: 600; margin-bottom: 8px; }
-        .call-status { font-size: 16px; color: #94a3b8; }
+        .call-status { font-size: 16px; color: #94a3b8; line-height: 1.4; word-break: break-word; }
+        .error-text { color: #f87171 !important; font-weight: 500; margin-top: 10px; }
         .timer { font-size: 20px; font-family: monospace; color: #38bdf8; margin-top: 8px; display: none; }
         .controls { display: flex; gap: 24px; margin-bottom: 40px; }
         .btn { width: 75px; height: 75px; border-radius: 50%; border: none; font-size: 30px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: transform 0.15s ease; }
@@ -105,7 +90,7 @@ fastify.get('/call', async (request, reply) => {
     <div class="caller-info">
         <div class="avatar" id="avatar">🎓</div>
         <div class="caller-name">AI English Tutor</div>
-        <div class="call-status" id="status">Incoming practice call...</div>
+        <div class="call-status" id="status">Tap below to start your practice call</div>
         <div class="timer" id="timer">00:00</div>
     </div>
 
@@ -120,35 +105,62 @@ fastify.get('/call', async (request, reply) => {
         let timerInterval = null;
         let seconds = 0;
 
+        function showError(msg) {
+            const statusEl = document.getElementById('status');
+            statusEl.className = 'call-status error-text';
+            statusEl.innerText = msg;
+            document.getElementById('answerBtn').style.display = 'flex';
+            document.getElementById('hangupBtn').style.display = 'none';
+        }
+
         async function startCall() {
-            document.getElementById('status').innerText = 'Connecting to tutor...';
+            const statusEl = document.getElementById('status');
+            statusEl.className = 'call-status';
+            statusEl.innerText = 'Connecting to OpenAI...';
             document.getElementById('answerBtn').style.display = 'none';
             document.getElementById('hangupBtn').style.display = 'flex';
 
             try {
-                // 1. Fetch ephemeral session token from backend
+                // 1. Get session token
                 const tokenResponse = await fetch('/session');
                 const sessionData = await tokenResponse.json();
-                const EPHEMERAL_KEY = sessionData.client_secret.value;
 
-                // 2. Initialize WebRTC Peer Connection
+                if (sessionData.error) {
+                    showError('OpenAI Error: ' + (sessionData.error.message || JSON.stringify(sessionData.error)));
+                    return;
+                }
+
+                if (!sessionData.client_secret || !sessionData.client_secret.value) {
+                    showError('Session Error: No token received. Response: ' + JSON.stringify(sessionData));
+                    return;
+                }
+
+                const EPHEMERAL_KEY = sessionData.client_secret.value;
+                statusEl.innerText = 'Requesting microphone...';
+
+                // 2. Microphone access
+                try {
+                    localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                } catch (micErr) {
+                    showError('Microphone Blocked: Please tap the lock icon in your browser URL bar and allow microphone permission.');
+                    return;
+                }
+
+                statusEl.innerText = 'Negotiating audio stream...';
+
+                // 3. WebRTC Setup
                 pc = new RTCPeerConnection();
 
-                // 3. Play incoming tutor audio
                 const audioEl = document.createElement('audio');
                 audioEl.autoplay = true;
                 pc.ontrack = (event) => {
                     audioEl.srcObject = event.streams[0];
                 };
 
-                // 4. Connect microphone
-                localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 pc.addTrack(localStream.getTracks()[0]);
 
-                // 5. Create Data Channel for session events
                 const dc = pc.createDataChannel('oai-events');
 
-                // 6. Negotiate SDP with OpenAI Realtime API
                 const offer = await pc.createOffer();
                 await pc.setLocalDescription(offer);
 
@@ -161,17 +173,23 @@ fastify.get('/call', async (request, reply) => {
                     body: offer.sdp
                 });
 
+                if (!sdpResponse.ok) {
+                    const errText = await sdpResponse.text();
+                    showError('WebRTC Error: ' + errText);
+                    return;
+                }
+
                 const answer = { type: 'answer', sdp: await sdpResponse.text() };
                 await pc.setRemoteDescription(answer);
 
-                // Call Connected!
-                document.getElementById('status').innerText = 'In Call • Speaking English';
+                // Connected!
+                statusEl.innerText = 'In Call • Speaking English';
                 document.getElementById('timer').style.display = 'block';
                 startTimer();
 
             } catch (err) {
                 console.error(err);
-                document.getElementById('status').innerText = 'Connection failed. Please refresh.';
+                showError('Error: ' + err.message);
             }
         }
 
@@ -188,7 +206,7 @@ fastify.get('/call', async (request, reply) => {
             if (pc) pc.close();
             if (localStream) localStream.getTracks().forEach(track => track.stop());
             clearInterval(timerInterval);
-            document.getElementById('status').innerText = 'Call Ended. Great job today!';
+            document.getElementById('status').innerText = 'Call Ended. Great practice!';
             document.getElementById('hangupBtn').style.display = 'none';
         }
     </script>
