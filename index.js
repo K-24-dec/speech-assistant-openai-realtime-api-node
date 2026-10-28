@@ -4,267 +4,197 @@ import dotenv from 'dotenv';
 import fastifyFormBody from '@fastify/formbody';
 import fastifyWs from '@fastify/websocket';
 
-// Load environment variables from .env file
 dotenv.config();
 
-// Retrieve the OpenAI API key from environment variables.
 const { OPENAI_API_KEY } = process.env;
 
 if (!OPENAI_API_KEY) {
-    console.error('Missing OpenAI API key. Please set it in the .env file.');
+    console.error('Missing OpenAI API key. Please set it in your environment or .env file.');
     process.exit(1);
 }
 
-// Initialize Fastify
 const fastify = Fastify();
 fastify.register(fastifyFormBody);
 fastify.register(fastifyWs);
 
-// Constants
-const SYSTEM_MESSAGE = 'You are a helpful and bubbly AI assistant who loves to chat about anything the user is interested about and is prepared to offer them facts. You have a penchant for dad jokes, owl jokes, and rickrolling – subtly. Always stay positive, but work in a joke when appropriate.';
-const VOICE = 'alloy';
-const TEMPERATURE = 0.8; // Controls the randomness of the AI's responses
-const PORT = process.env.PORT || 5050; // Allow dynamic port assignment
+// ----------------------------------------------------------------------
+// English Tutor System Instruction
+// ----------------------------------------------------------------------
+const SYSTEM_MESSAGE = `You are my friendly, patient, professional English-speaking coach. Speak naturally in clear, simple American English. Use a warm, calm, gentleman-like voice with a relatively low pitch when supported by the selected voice.
 
-// List of Event Types to log to the console. See the OpenAI Realtime API Documentation: https://platform.openai.com/docs/api-reference/realtime
-const LOG_EVENT_TYPES = [
-    'error',
-    'response.content.done',
-    'rate_limits.updated',
-    'response.done',
-    'input_audio_buffer.committed',
-    'input_audio_buffer.speech_stopped',
-    'input_audio_buffer.speech_started',
-    'session.created',
-    'session.updated'
-];
+Your main goal is to help me become confident and fluent in spoken English. Speak at a moderate pace, avoid unnecessarily complicated vocabulary, and give me enough time to respond.
 
-// Show AI response elapsed timing calculations
-const SHOW_TIMING_MATH = false;
+Treat mistakes as a normal part of learning. Never embarrass me, criticize me harshly, or interrupt unnecessarily. Encourage me to speak rather than giving long lectures.
+
+Structure each 15-minute session as follows:
+- Minutes 0-2 (Warm-up): Greet me warmly. Ask how my day went. Ask one simple question to get me talking.
+- Minutes 2-5 (Everyday Conversation): Choose a topic like college, hobbies, technology, career, travel, or startups. Ask follow-up questions.
+- Minutes 5-9 (Focused Practice): Practice pronunciation, grammar correction, vocabulary, or explaining technical concepts.
+- Minutes 9-12 (Role-Play): Simulate real-world situations like job interviews, meetings, or project presentations.
+- Minutes 12-14 (Feedback): Give no more than 3 gentle, specific corrections (what I said vs a more natural version).
+- Minutes 14-15 (Recap & Goodbye): Mention new words learned and end politely.
+
+Conversation rules:
+- Speak one question at a time.
+- Let me do most of the talking.
+- If I struggle, provide a short example and encourage me.`;
+
+const PORT = process.env.PORT || 5050;
 
 // Root Route
 fastify.get('/', async (request, reply) => {
     reply.send({ message: 'Twilio Media Stream Server is running!' });
 });
 
-// Route for Twilio to handle incoming calls
-// <Say> punctuation to improve text-to-speech translation
-fastify.all('/incoming-call', async (request, reply) => {
-    const twimlResponse = `<?xml version="1.0" encoding="UTF-8"?>
-                          <Response>
-                              <Say voice="Google.en-US-Chirp3-HD-Aoede">Please wait while we connect your call to the A. I. voice assistant, powered by Twilio and the Open A I Realtime API</Say>
-                              <Pause length="1"/>
-                              <Say voice="Google.en-US-Chirp3-HD-Aoede">O.K. you can start talking!</Say>
-                              <Connect>
-                                  <Stream url="wss://${request.headers.host}/media-stream" />
-                              </Connect>
-                          </Response>`;
+// ----------------------------------------------------------------------
+// Endpoint to generate an ephemeral OpenAI Realtime session token
+// ----------------------------------------------------------------------
+fastify.get('/session', async (request, reply) => {
+    try {
+        const response = await fetch('https://api.openai.com/v1/realtime/sessions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${OPENAI_API_KEY}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                model: 'gpt-4o-realtime-preview-2024-12-17',
+                voice: 'alloy',
+                instructions: SYSTEM_MESSAGE,
+                turn_detection: { type: 'server_vad' },
+                input_audio_transcription: { model: 'whisper-1' }
+            }),
+        });
 
-    reply.type('text/xml').send(twimlResponse);
+        const data = await response.json();
+        reply.send(data);
+    } catch (err) {
+        console.error('Error creating OpenAI session:', err);
+        reply.status(500).send({ error: 'Failed to create realtime session' });
+    }
 });
 
-// WebSocket route for media-stream
-fastify.register(async (fastify) => {
-    fastify.get('/media-stream', { websocket: true }, (connection, req) => {
-        console.log('Client connected');
+// ----------------------------------------------------------------------
+// Mobile-Optimized Browser Voice Call Screen
+// ----------------------------------------------------------------------
+fastify.get('/call', async (request, reply) => {
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI English Tutor Call</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        body { background: #0f172a; color: white; display: flex; flex-direction: column; align-items: center; justify-content: space-between; height: 100vh; padding: 40px 20px; }
+        .caller-info { text-align: center; margin-top: 40px; }
+        .avatar { width: 110px; height: 110px; border-radius: 50%; background: #334155; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 48px; box-shadow: 0 0 25px rgba(56, 189, 248, 0.3); }
+        .caller-name { font-size: 26px; font-weight: 600; margin-bottom: 8px; }
+        .call-status { font-size: 16px; color: #94a3b8; }
+        .timer { font-size: 20px; font-family: monospace; color: #38bdf8; margin-top: 8px; display: none; }
+        .controls { display: flex; gap: 24px; margin-bottom: 40px; }
+        .btn { width: 75px; height: 75px; border-radius: 50%; border: none; font-size: 30px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: transform 0.15s ease; }
+        .btn:active { transform: scale(0.92); }
+        .btn-answer { background: #22c55e; color: white; box-shadow: 0 4px 20px rgba(34, 197, 94, 0.4); }
+        .btn-hangup { background: #ef4444; color: white; box-shadow: 0 4px 20px rgba(239, 68, 68, 0.4); display: none; }
+        .pulse { animation: pulse-ring 2s infinite; }
+        @keyframes pulse-ring { 0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); } 70% { box-shadow: 0 0 0 20px rgba(34, 197, 94, 0); } 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); } }
+    </style>
+</head>
+<body>
+    <div class="caller-info">
+        <div class="avatar" id="avatar">🎓</div>
+        <div class="caller-name">AI English Tutor</div>
+        <div class="call-status" id="status">Incoming practice call...</div>
+        <div class="timer" id="timer">00:00</div>
+    </div>
 
-        // Connection-specific state
-        let streamSid = null;
-        let latestMediaTimestamp = 0;
-        let lastAssistantItem = null;
-        let markQueue = [];
-        let responseStartTimestampTwilio = null;
+    <div class="controls">
+        <button class="btn btn-answer pulse" id="answerBtn" onclick="startCall()">📞</button>
+        <button class="btn btn-hangup" id="hangupBtn" onclick="endCall()">📴</button>
+    </div>
 
-        const openAiWs = new WebSocket(`wss://api.openai.com/v1/realtime?model=gpt-realtime&temperature=${TEMPERATURE}`, {
-            headers: {
-                Authorization: `Bearer ${OPENAI_API_KEY}`,
-            }
-        });
+    <script>
+        let pc = null;
+        let localStream = null;
+        let timerInterval = null;
+        let seconds = 0;
 
-        // Control initial session with OpenAI
-        const initializeSession = () => {
-            const sessionUpdate = {
-                type: 'session.update',
-                session: {
-                    type: 'realtime',
-                    model: "gpt-realtime",
-                    output_modalities: ["audio"],
-                    audio: {
-                        input: { format: { type: 'audio/pcmu' }, turn_detection: { type: "server_vad" } },
-                        output: { format: { type: 'audio/pcmu' }, voice: VOICE },
-                    },
-                    instructions: SYSTEM_MESSAGE,
-                },
-            };
+        async function startCall() {
+            document.getElementById('status').innerText = 'Connecting to tutor...';
+            document.getElementById('answerBtn').style.display = 'none';
+            document.getElementById('hangupBtn').style.display = 'flex';
 
-            console.log('Sending session update:', JSON.stringify(sessionUpdate));
-            openAiWs.send(JSON.stringify(sessionUpdate));
+            try {
+                // 1. Fetch ephemeral session token from backend
+                const tokenResponse = await fetch('/session');
+                const sessionData = await tokenResponse.json();
+                const EPHEMERAL_KEY = sessionData.client_secret.value;
 
-            // Uncomment the following line to have AI speak first:
-            // sendInitialConversationItem();
-        };
+                // 2. Initialize WebRTC Peer Connection
+                pc = new RTCPeerConnection();
 
-        // Send initial conversation item if AI talks first
-        const sendInitialConversationItem = () => {
-            const initialConversationItem = {
-                type: 'conversation.item.create',
-                item: {
-                    type: 'message',
-                    role: 'user',
-                    content: [
-                        {
-                            type: 'input_text',
-                            text: 'Greet the user with "Hello there! I am an AI voice assistant powered by Twilio and the OpenAI Realtime API. You can ask me for facts, jokes, or anything you can imagine. How can I help you?"'
-                        }
-                    ]
-                }
-            };
-
-            if (SHOW_TIMING_MATH) console.log('Sending initial conversation item:', JSON.stringify(initialConversationItem));
-            openAiWs.send(JSON.stringify(initialConversationItem));
-            openAiWs.send(JSON.stringify({ type: 'response.create' }));
-        };
-
-        // Handle interruption when the caller's speech starts
-        const handleSpeechStartedEvent = () => {
-            if (markQueue.length > 0 && responseStartTimestampTwilio != null) {
-                const elapsedTime = latestMediaTimestamp - responseStartTimestampTwilio;
-                if (SHOW_TIMING_MATH) console.log(`Calculating elapsed time for truncation: ${latestMediaTimestamp} - ${responseStartTimestampTwilio} = ${elapsedTime}ms`);
-
-                if (lastAssistantItem) {
-                    const truncateEvent = {
-                        type: 'conversation.item.truncate',
-                        item_id: lastAssistantItem,
-                        content_index: 0,
-                        audio_end_ms: elapsedTime
-                    };
-                    if (SHOW_TIMING_MATH) console.log('Sending truncation event:', JSON.stringify(truncateEvent));
-                    openAiWs.send(JSON.stringify(truncateEvent));
-                }
-
-                connection.send(JSON.stringify({
-                    event: 'clear',
-                    streamSid: streamSid
-                }));
-
-                // Reset
-                markQueue = [];
-                lastAssistantItem = null;
-                responseStartTimestampTwilio = null;
-            }
-        };
-
-        // Send mark messages to Media Streams so we know if and when AI response playback is finished
-        const sendMark = (connection, streamSid) => {
-            if (streamSid) {
-                const markEvent = {
-                    event: 'mark',
-                    streamSid: streamSid,
-                    mark: { name: 'responsePart' }
+                // 3. Play incoming tutor audio
+                const audioEl = document.createElement('audio');
+                audioEl.autoplay = true;
+                pc.ontrack = (event) => {
+                    audioEl.srcObject = event.streams[0];
                 };
-                connection.send(JSON.stringify(markEvent));
-                markQueue.push('responsePart');
+
+                // 4. Connect microphone
+                localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                pc.addTrack(localStream.getTracks()[0]);
+
+                // 5. Create Data Channel for session events
+                const dc = pc.createDataChannel('oai-events');
+
+                // 6. Negotiate SDP with OpenAI Realtime API
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+
+                const sdpResponse = await fetch('https://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': 'Bearer ' + EPHEMERAL_KEY,
+                        'Content-Type': 'application/sdp'
+                    },
+                    body: offer.sdp
+                });
+
+                const answer = { type: 'answer', sdp: await sdpResponse.text() };
+                await pc.setRemoteDescription(answer);
+
+                // Call Connected!
+                document.getElementById('status').innerText = 'In Call • Speaking English';
+                document.getElementById('timer').style.display = 'block';
+                startTimer();
+
+            } catch (err) {
+                console.error(err);
+                document.getElementById('status').innerText = 'Connection failed. Please refresh.';
             }
-        };
+        }
 
-        // Open event for OpenAI WebSocket
-        openAiWs.on('open', () => {
-            console.log('Connected to the OpenAI Realtime API');
-            setTimeout(initializeSession, 100);
-        });
+        function startTimer() {
+            timerInterval = setInterval(() => {
+                seconds++;
+                const mins = String(Math.floor(seconds / 60)).padStart(2, '0');
+                const secs = String(seconds % 60).padStart(2, '0');
+                document.getElementById('timer').innerText = mins + ':' + secs;
+            }, 1000);
+        }
 
-        // Listen for messages from the OpenAI WebSocket (and send to Twilio if necessary)
-        openAiWs.on('message', (data) => {
-            try {
-                const response = JSON.parse(data);
-
-                if (LOG_EVENT_TYPES.includes(response.type)) {
-                    console.log(`Received event: ${response.type}`, response);
-                }
-
-                if (response.type === 'response.output_audio.delta' && response.delta) {
-                    const audioDelta = {
-                        event: 'media',
-                        streamSid: streamSid,
-                        media: { payload: response.delta }
-                    };
-                    connection.send(JSON.stringify(audioDelta));
-
-                    // First delta from a new response starts the elapsed time counter
-                    if (!responseStartTimestampTwilio) {
-                        responseStartTimestampTwilio = latestMediaTimestamp;
-                        if (SHOW_TIMING_MATH) console.log(`Setting start timestamp for new response: ${responseStartTimestampTwilio}ms`);
-                    }
-
-                    if (response.item_id) {
-                        lastAssistantItem = response.item_id;
-                    }
-                    
-                    sendMark(connection, streamSid);
-                }
-
-                if (response.type === 'input_audio_buffer.speech_started') {
-                    handleSpeechStartedEvent();
-                }
-            } catch (error) {
-                console.error('Error processing OpenAI message:', error, 'Raw message:', data);
-            }
-        });
-
-        // Handle incoming messages from Twilio
-        connection.on('message', (message) => {
-            try {
-                const data = JSON.parse(message);
-
-                switch (data.event) {
-                    case 'media':
-                        latestMediaTimestamp = data.media.timestamp;
-                        if (SHOW_TIMING_MATH) console.log(`Received media message with timestamp: ${latestMediaTimestamp}ms`);
-                        if (openAiWs.readyState === WebSocket.OPEN) {
-                            const audioAppend = {
-                                type: 'input_audio_buffer.append',
-                                audio: data.media.payload
-                            };
-                            openAiWs.send(JSON.stringify(audioAppend));
-                        }
-                        break;
-                    case 'start':
-                        streamSid = data.start.streamSid;
-                        console.log('Incoming stream has started', streamSid);
-
-                        // Reset start and media timestamp on a new stream
-                        responseStartTimestampTwilio = null; 
-                        latestMediaTimestamp = 0;
-                        break;
-                    case 'mark':
-                        if (markQueue.length > 0) {
-                            markQueue.shift();
-                        }
-                        break;
-                    default:
-                        console.log('Received non-media event:', data.event);
-                        break;
-                }
-            } catch (error) {
-                console.error('Error parsing message:', error, 'Message:', message);
-            }
-        });
-
-        // Handle connection close
-        connection.on('close', () => {
-            if (openAiWs.readyState === WebSocket.OPEN) openAiWs.close();
-            console.log('Client disconnected.');
-        });
-
-        // Handle WebSocket close and errors
-        openAiWs.on('close', () => {
-            console.log('Disconnected from the OpenAI Realtime API');
-        });
-
-        openAiWs.on('error', (error) => {
-            console.error('Error in the OpenAI WebSocket:', error);
-        });
-    });
+        function endCall() {
+            if (pc) pc.close();
+            if (localStream) localStream.getTracks().forEach(track => track.stop());
+            clearInterval(timerInterval);
+            document.getElementById('status').innerText = 'Call Ended. Great job today!';
+            document.getElementById('hangupBtn').style.display = 'none';
+        }
+    </script>
+</body>
+</html>`;
+    reply.type('text/html').send(html);
 });
 
 fastify.listen({ port: PORT, host: '0.0.0.0' }, (err) => {
@@ -272,5 +202,5 @@ fastify.listen({ port: PORT, host: '0.0.0.0' }, (err) => {
         console.error(err);
         process.exit(1);
     }
-    console.log(`Server is listening on port ${PORT}`);
+    console.log(`[INFO] Server running on port ${PORT}`);
 });
